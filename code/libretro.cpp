@@ -5,6 +5,7 @@
 #include <memory>
 #include <ctime>
 #include <cstdlib>
+#include <algorithm>
 
 #include "libretro.h"
 
@@ -22,8 +23,8 @@ struct system_t {
 };
 
 struct framebuffer_t {
-    static constexpr retro_pixel_format pixel_format = RETRO_PIXEL_FORMAT_RGB565;
-    using pixel_t = unsigned short;
+    static constexpr retro_pixel_format pixel_format = RETRO_PIXEL_FORMAT_XRGB8888;
+    using pixel_t = unsigned int;
     static constexpr size_t width = 256;
     static constexpr size_t height = 240;
     static constexpr size_t pitch = sizeof(pixel_t) * width;
@@ -31,8 +32,35 @@ struct framebuffer_t {
 
     pixel_t data[framebuffer_t::width * framebuffer_t::height];
 
-    void clear() {
-        memset(data, 0, sizeof(data));
+    void clear(pixel_t pixel = 0) {
+        memset(data, pixel, sizeof(data));
+    }
+
+    void point(int x, int y, pixel_t pixel = 0) {
+        data[y * width + x] = pixel;
+    }
+
+    void blit(int x, int y, pixel_t pixel, size_t rect_width, size_t rect_height) {
+        auto w = std::min(width - x, rect_width);
+        auto h = std::min(height - x, rect_height);
+        for (size_t i = 0; i < w; ++i) {
+            for (size_t j = 0; j < h; ++j) {
+                auto src = (j + y) * width + (i + x);
+                data[src] = pixel;
+            }
+        }
+    }
+
+    void blit(int x, int y, pixel_t *pixels, size_t rect_width, size_t rect_height) {
+        auto w = std::min(width - x, rect_width);
+        auto h = std::min(height - x, rect_height);
+        for (size_t i = 0; i < w; ++i) {
+            for (size_t j = 0; j < h; ++j) {
+                auto src = (j + y) * width + (i + x);
+                auto dist = j * rect_width + i;
+                data[src] = pixels[dist];
+            }
+        }
     }
 };
 
@@ -160,27 +188,58 @@ void retro_set_input_state(retro_input_state_t cb) { ::core.set(cb); }
 
 void retro_init(void)
 {
-    /* set up some logging */
-    struct retro_log_callback log;
-    unsigned level = 4;
-
     std::srand(time(NULL));
 
+    struct retro_log_callback log;
     if (::core.environment(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log))
         ::core.set(log.log);
     else
         ::core.set(::std_log_printf);
 
     // the performance level is guide to frontend to give an idea of how intensive this core is to run
+    unsigned level = 4;
     ::core.environment(RETRO_ENVIRONMENT_SET_PERFORMANCE_LEVEL, &level);
 
-    static framebuffer_t::pixel_t pixel = 0;
-    for (int x = 0; x < framebuffer_t::width; ++x) {
-        for (int y = 0; y < framebuffer_t::height; ++y) {
-            if (pixel == 0xFFFF) pixel = 0;
-            ::core.framebuffer.data[x + y * framebuffer_t::width] = pixel++;
-        }
+    ::core.framebuffer.clear(0xFFFFFFFF);
+
+    // Dawnbringer pallete 8
+    constexpr ::framebuffer_t::pixel_t pallete[] = {
+        0x000000,
+        0x55415F,
+        0x646964,
+        0xD77355,
+        0x508CD7,
+        0x64B964,
+        0xE6C86E,
+        0xDCF5FF,
+    };
+    constexpr size_t k = 0;
+    constexpr size_t v = 1;
+    constexpr size_t a = 2;
+    constexpr size_t r = 3;
+    constexpr size_t g = 4;
+    constexpr size_t b = 5;
+    constexpr size_t y = 6;
+    constexpr size_t w = 7;
+    constexpr size_t sprite[8 * 8] = {
+        1, 0, 0, 0, 0, 0, 0, 1,
+        0, 2, 1, 1, 1, 1, 2, 0,
+        0, 1, 3, 2, 2, 3, 1, 0,
+        0, 1, 2, 4, 5, 2, 1, 0,
+        0, 1, 2, 6, 7, 2, 1, 0,
+        0, 1, 3, 2, 2, 3, 1, 0,
+        0, 2, 1, 1, 1, 1, 2, 0,
+        1, 0, 0, 0, 0, 0, 0, 1,
+    };
+    constexpr auto sprite_size = sizeof(sprite) / sizeof(sprite[0]);
+
+    ::framebuffer_t::pixel_t pixels[sprite_size]{};
+    for (int i = 0; i < sprite_size; ++i) {
+        pixels[i] = pallete[sprite[i]];
     }
+
+    ::core.framebuffer.blit(0, 0, pixels, 8, 8);
+
 }
 
 
@@ -214,6 +273,7 @@ void retro_run(void)
     for (int i = 0; i < system_t::audio_samples; i++) {
         ::core.audio_sample(1, 1);
     }
+
 #if 0
     for (auto& cell : ::core.framebuffer.data) {
         cell = std::rand();

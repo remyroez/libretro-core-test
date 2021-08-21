@@ -9,6 +9,9 @@
 
 #include "libretro.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 #define FES_MAJOR_VERSION 1
 #define FES_MINOR_VERSION 0
 #define FES_PATCH_VERSION 0
@@ -21,6 +24,8 @@ struct system_t {
     static constexpr double sample_rate = 44100;
     static constexpr int audio_samples = (int)sample_rate / (int)fps / 10;
 };
+
+unsigned char* image_data = nullptr;
 
 struct framebuffer_t {
     static constexpr retro_pixel_format pixel_format = RETRO_PIXEL_FORMAT_XRGB8888;
@@ -202,6 +207,19 @@ void retro_init(void)
 
     ::core.framebuffer.clear(0xFFFFFFFF);
 
+    int image_width = 0;
+    int image_height = 0;
+    int channels_in_file = 0;
+    constexpr int desired_channels = 4;
+    image_data = stbi_load("../assets/test.png", &image_width, &image_height, &channels_in_file, desired_channels);
+    for (int x = 0; x < image_width; ++x) {
+        for (int y = 0; y < image_height; ++y) {
+            auto index = y * image_width * desired_channels + x * desired_channels;
+            std::swap(image_data[index + 0], image_data[index + 2]);
+            image_data[index + 3];
+        }
+    }
+#if 0
     // Dawnbringer pallete 8
     constexpr ::framebuffer_t::pixel_t pallete[] = {
         0x000000,
@@ -239,7 +257,9 @@ void retro_init(void)
     }
 
     ::core.framebuffer.blit(0, 0, pixels, 8, 8);
-
+#else
+    if (image_data) ::core.framebuffer.blit(0, 0, (::framebuffer_t::pixel_t*)image_data, image_width, image_height);
+#endif
 }
 
 

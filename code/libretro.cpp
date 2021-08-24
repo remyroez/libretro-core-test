@@ -4,6 +4,7 @@
 #include <stdarg.h>
 #include <memory>
 #include <ctime>
+#include <cmath>
 #include <cstdlib>
 #include <algorithm>
 
@@ -22,7 +23,7 @@ namespace {
 struct system_t {
     static constexpr float fps = 60.f;
     static constexpr double sample_rate = 44100;
-    static constexpr int audio_samples = (int)sample_rate / (int)fps / 10;
+    static constexpr int audio_samples = (int)sample_rate / (int)fps;
 };
 
 unsigned char* image_data = nullptr;
@@ -103,6 +104,8 @@ struct core_t {
     DEFINE_CB(input_state);
     DEFINE_CB(log_printf);
 
+    bool use_audio = false;
+
 #undef CB_TYPE
 #undef CB_VALUE
 #undef DEFINE_CB
@@ -134,6 +137,7 @@ constexpr retro_system_av_info system_av_info = {
 
 void std_log_printf(retro_log_level level, const char* fmt, ...)
 {
+    (void)level;
     va_list args;
     va_start(args, fmt);
     vprintf(fmt, args);
@@ -148,9 +152,38 @@ unsigned retro_api_version(void) { return RETRO_API_VERSION; }
 void retro_cheat_reset(void) {}
 void retro_cheat_set(unsigned index, bool enabled, const char *code) {}
 
+#define PI 3.14159265359
+
+static void audio_callback(void)
+{
+    static unsigned phase;
+    for (unsigned i = 0; i < system_t::audio_samples; i++, phase++)
+    {
+        int16_t val = 0x800 * sinf(2.0f * PI * phase * 300.0f / 30000.0f);
+        ::core.audio_sample(val, val);
+    }
+
+    phase %= 100;
+}
+
+static void audio_set_state(bool enable)
+{
+    (void)enable;
+}
+
 // Load a cartridge
 bool retro_load_game(const struct retro_game_info *info)
 {
+    auto fmt = framebuffer_t::pixel_format;
+    if (!::core.environment(RETRO_ENVIRONMENT_SET_PIXEL_FORMAT, &fmt))
+    {
+        ::core.log_printf(RETRO_LOG_INFO, "XRGB8888 is not supported.\n");
+        return false;
+    }
+
+    struct retro_audio_callback audio_cb = { audio_callback, audio_set_state };
+    ::core.use_audio = ::core.environment(RETRO_ENVIRONMENT_SET_AUDIO_CALLBACK, &audio_cb);
+
     return true;
 }
 
@@ -289,11 +322,10 @@ void retro_reset(void) {  }
 // Run a single frames with out Vectrex emulation.
 void retro_run(void)
 {
-    // 882 audio samples per frame (44.1kHz @ 50 fps)
-    for (int i = 0; i < system_t::audio_samples; i++) {
-        ::core.audio_sample(1, 1);
+    if (!::core.use_audio) {
+        audio_callback();
     }
-
+    
 #if 0
     for (auto& cell : ::core.framebuffer.data) {
         cell = std::rand();

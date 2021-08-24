@@ -7,11 +7,15 @@
 #include <cmath>
 #include <cstdlib>
 #include <algorithm>
+#include <vector>
 
 #include "libretro.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
+
+#define STB_VORBIS_HEADER_ONLY
+#include "stb_vorbis.c"
 
 #define FES_MAJOR_VERSION 1
 #define FES_MINOR_VERSION 0
@@ -27,6 +31,8 @@ struct system_t {
 };
 
 unsigned char* image_data = nullptr;
+stb_vorbis* vorbis = nullptr;
+stb_vorbis_info vorbis_info;
 
 struct framebuffer_t {
     static constexpr retro_pixel_format pixel_format = RETRO_PIXEL_FORMAT_XRGB8888;
@@ -101,7 +107,7 @@ struct core_t {
     DEFINE_CB(audio_sample);
     DEFINE_CB_DEFAULT(audio_sample_batch);
     DEFINE_CB(input_poll);
-    DEFINE_CB(input_state);
+    DEFINE_CB_DEFAULT(input_state);
     DEFINE_CB(log_printf);
 
     bool use_audio = false;
@@ -156,6 +162,7 @@ void retro_cheat_set(unsigned index, bool enabled, const char *code) {}
 
 static void audio_callback(void)
 {
+#if 0
     static unsigned phase;
     for (unsigned i = 0; i < system_t::audio_samples; i++, phase++)
     {
@@ -164,6 +171,19 @@ static void audio_callback(void)
     }
 
     phase %= 100;
+#endif
+    static std::vector<short> stream;
+    if (stream.size() == 0) {
+        stream.resize(static_cast<size_t>(vorbis_info.channels) * system_t::audio_samples);
+    }
+    if (stb_vorbis_get_frame_short_interleaved(vorbis, 2, (short*)stream.data(), stream.size()) > 0) {
+        ::core.audio_sample_batch(stream.data(), system_t::audio_samples);
+
+    } else {
+        for (unsigned i = 0; i < system_t::audio_samples; i++) {
+            ::core.audio_sample(1, 1);
+        }
+    }
 }
 
 static void audio_set_state(bool enable)
@@ -293,6 +313,11 @@ void retro_init(void)
 #else
     if (image_data) ::core.framebuffer.blit(0, 0, (::framebuffer_t::pixel_t*)image_data, image_width, image_height);
 #endif
+
+    int error = 0;
+    stb_vorbis_alloc* alloc = nullptr;
+    vorbis = stb_vorbis_open_filename("../assets/test.ogg", &error, alloc);
+    vorbis_info = stb_vorbis_get_info(vorbis);
 }
 
 
@@ -334,5 +359,16 @@ void retro_run(void)
 
     //::core.log_printf(retro_log_level::RETRO_LOG_ERROR, "Hello World! (%d)\n", std::rand());
     ::core.input_poll();
+
+    static int timer = static_cast<int>(system_t::fps);
+    if (::core.input_state(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP) && timer <= 0)
+    {
+        if (vorbis) {
+            stb_vorbis_seek_start(vorbis);
+            timer = static_cast<int>(system_t::fps);
+        }
+    }
+    if (timer > 0) timer--;
+
     ::core.video_refresh();
 }

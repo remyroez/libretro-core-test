@@ -176,11 +176,12 @@ static void audio_callback(void)
     if (stream.size() == 0) {
         stream.resize(static_cast<size_t>(vorbis_info.channels) * system_t::audio_samples);
     }
-    if (stb_vorbis_get_frame_short_interleaved(vorbis, 2, (short*)stream.data(), stream.size()) > 0) {
-        ::core.audio_sample_batch(stream.data(), system_t::audio_samples);
+    auto len = stb_vorbis_get_frame_short_interleaved(vorbis, 2, (short*)stream.data(), stream.size());
+    if (len > 0) ::core.audio_sample_batch(stream.data(), len);
 
-    } else {
-        for (unsigned i = 0; i < system_t::audio_samples; i++) {
+    auto last = system_t::audio_samples - len;
+    if (last > 0) {
+        for (unsigned i = 0; i < last; i++) {
             ::core.audio_sample(1, 1);
         }
     }
@@ -360,15 +361,13 @@ void retro_run(void)
     //::core.log_printf(retro_log_level::RETRO_LOG_ERROR, "Hello World! (%d)\n", std::rand());
     ::core.input_poll();
 
-    static int timer = static_cast<int>(system_t::fps);
-    if (::core.input_state(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP) && timer <= 0)
+    static int16_t last_input = 0;
+    auto input = ::core.input_state(0, RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B);
+    if (input && input != last_input)
     {
-        if (vorbis) {
-            stb_vorbis_seek_start(vorbis);
-            timer = static_cast<int>(system_t::fps);
-        }
+        if (vorbis) stb_vorbis_seek_start(vorbis);
     }
-    if (timer > 0) timer--;
+    last_input = input;
 
     ::core.video_refresh();
 }
